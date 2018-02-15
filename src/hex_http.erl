@@ -2,12 +2,14 @@
 -export([adapter/0, adapter/1, get/2, user_agent/0]).
 
 -type url() :: string().
+-type status_code() :: 200..599.
+-type headers() :: [{string(), string()}].
 
--callback get(url(), string()) -> binary().
+-callback get(url(), string()) -> {ok, {status_code(), headers(), binary()}} | {error, term()}.
 
 -callback user_agent_string() -> string().
 
--spec get(url(), string()) -> binary().
+-spec get(url(), string()) -> {ok, {status_code(), headers(), binary()}} | {error, term()}.
 get(Url, Accept) ->
     Adapter = adapter(),
     Headers = [

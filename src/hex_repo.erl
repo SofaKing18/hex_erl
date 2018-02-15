@@ -11,28 +11,43 @@ api_url(Repo) ->
 repo_url(Repo) ->
     maps:get(repo_url, repo(Repo)).
 
--spec names(repo()) -> [#{name => binary()}].
+-spec names(repo()) -> {ok, [#{name => binary()}]} | {error, term()}.
 names(Repo) ->
-    Body = get(Repo, "/names"),
-    hex_registry:decode_names(Body).
+    case get(Repo, "/names") of
+        {ok, Body} ->
+            {ok, hex_registry:decode_names(Body)};
+
+        Other ->
+            Other
+    end.
 
 -spec versions(repo()) ->
-        [#{name => binary(),
-           retired => [hex_tarball:version()],
-           versions => [hex_tarball:version()]}].
+        {ok, [#{name => binary(),
+                retired => [hex_tarball:version()],
+                versions => [hex_tarball:version()]}]} | {error, term()}.
 versions(Repo) ->
-    Body = get(Repo, "/versions"),
-    hex_registry:decode_versions(Body).
+    case get(Repo, "/versions") of
+        {ok, Body} ->
+            {ok, hex_registry:decode_versions(Body)};
+
+        Other ->
+            Other
+    end.
 
 -spec package(repo(), string()) ->
-        #{releases => [#{checksum => hex_tarball:checksum(),
+        {ok, #{releases => [#{checksum => hex_tarball:checksum(),
                          dependencies => [map()],
-                         version => hex_tarball:version()}]}.
+                         version => hex_tarball:version()}]}} | {error, term()}.
 package(Repo, Name) ->
-    Body = get(Repo, "/packages/" ++ Name),
-    hex_registry:decode_package(Body).
+    case get(Repo, "/packages/" ++ Name) of
+        {ok, Body} ->
+            {ok, hex_registry:decode_package(Body)};
 
--spec tarball(repo(), string(), string()) -> hex_tarball:tarball().
+        Other ->
+            Other
+    end.
+
+-spec tarball(repo(), string(), string()) -> {ok, hex_tarball:tarball()} | {error, term()}.
 tarball(Repo, Name, Version) ->
     get(Repo,  "/tarballs/" ++ Name ++ "-" ++ Version ++ ".tar").
 
@@ -40,7 +55,13 @@ tarball(Repo, Name, Version) ->
 
 get(Repo, Path) ->
     Url = repo_url(Repo),
-    hex_http:get(Url ++ Path, "application/octet-stream").
+    case hex_http:get(Url ++ Path, "application/octet-stream") of
+        {ok, {200, _, Body}} ->
+            {ok, Body};
+
+        Other ->
+            Other
+    end.
 
 repo(hexpm) ->
     #{

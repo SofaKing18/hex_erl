@@ -7,6 +7,6 @@ user_agent_string() ->
     "(httpc)".
 
 get(Url, Headers) ->
-    {ok, {{_, 200, _}, _Headers, Body}} =
+    {ok, {{_, StatusCode, _}, ResponseHeaders, ResponseBody}} =
         httpc:request(get, {Url, Headers}, [], [{body_format, binary}]),
-    Body.
+    {ok, {StatusCode, ResponseHeaders, ResponseBody}}.
