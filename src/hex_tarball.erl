@@ -29,11 +29,11 @@ create(Metadata, Files) ->
     MetaBinary = encode_metadata(Metadata),
     ContentsBinary = create_tarball(Files, [compressed]),
     Checksum = checksum(MetaBinary, ContentsBinary),
-    ChecksumEncoded = encode_checksum(Checksum),
+    ChecksumBase16 = encode_base16(Checksum),
 
     OuterFiles = [
                   {"VERSION", ?VERSION},
-                  {"CHECKSUM", ChecksumEncoded},
+                  {"CHECKSUM", ChecksumBase16},
                   {"metadata.config", MetaBinary},
                   {"contents.tar.gz", ContentsBinary}
                  ],
@@ -63,7 +63,7 @@ unpack(Tarball) ->
     {"contents.tar.gz", Contents} = lists:keyfind("contents.tar.gz", 1, OuterFiles),
     Metadata = decode_metadata(MetaBinary),
     {ok, Files} = erl_tar:extract({binary, Contents}, [memory, compressed]),
-    {ok, {Metadata, Checksum, Files}}.
+    {ok, {Metadata, decode_base16(Checksum), Files}}.
 
 %% Private
 
@@ -77,11 +77,6 @@ create_tarball(Files, Options) ->
 checksum(MetaString, Contents) ->
     Blob = <<(?VERSION)/binary, MetaString/binary, Contents/binary>>,
     crypto:hash(sha256, Blob).
-
-encode_checksum(Checksum) ->
-    <<X:256/big-unsigned-integer>> = Checksum,
-    String = string:to_upper(lists:flatten(io_lib:format("~64.16.0b", [X]))),
-    list_to_binary(String).
 
 decode_metadata(Binary) when is_binary(Binary) ->
     String = binary_to_list(Binary),
@@ -118,3 +113,21 @@ binarify({Key, Value}) ->
     {binarify(Key), binarify(Value)};
 binarify(Term) ->
     Term.
+
+encode_base16(Binary) ->
+    <<X:256/big-unsigned-integer>> = Binary,
+    String = string:to_upper(lists:flatten(io_lib:format("~64.16.0b", [X]))),
+    list_to_binary(String).
+
+%% Based on https://github.com/goj/base16/blob/master/src/base16.erl
+%% (C) 2012, Erlang Solutions Ltd.
+
+decode_base16(Base16) ->
+    << <<(unhex(H) bsl 4 + unhex(L))>> || <<H,L>> <= Base16 >>.
+
+unhex(D) when $0 =< D andalso D =< $9 ->
+    D - $0;
+unhex(D) when $a =< D andalso D =< $f ->
+    10 + D - $a;
+unhex(D) when $A =< D andalso D =< $F ->
+    10 + D - $A.
