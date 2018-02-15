@@ -66,7 +66,7 @@ Checksum2.
 Searching for packages:
 
 ```erlang
-hex_api:search("recon").
+hex_api:search(hexpm, "recon").
 %%=> [#{<<"downloads">> => ...,
 %%=>    <<"html_url">> => <<"https://hex.pm/packages/recon">>,
 %%=>    <<"meta">> =>

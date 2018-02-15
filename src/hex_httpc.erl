@@ -1,15 +1,11 @@
 -module(hex_httpc).
 -behavior(hex_http).
--export([get/1]).
+-export([get/2, user_agent_string/0]).
 
-get(Url) ->
-    Headers = [
-           {"user-agent", user_agent()},
-           {"accept", "application/vnd.hex+erlang"}
-    ],
-    {ok, {{_, 200, _}, _Headers, Body}} = httpc:request(get, {Url, Headers}, [], [{body_format, binary}]),
-    binary_to_term(Body).
+user_agent_string() ->
+    "(httpc)".
 
-user_agent() ->
-    OtpVersion = erlang:system_info(otp_release),
-    "hex_erl/0.1.0 (httpc) (OTP/" ++ OtpVersion ++ ")".
+get(Url, Headers) ->
+    {ok, {{_, 200, _}, _Headers, Body}} =
+        httpc:request(get, {Url, Headers}, [], [{body_format, binary}]),
+    Body.
