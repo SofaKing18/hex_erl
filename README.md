@@ -10,7 +10,7 @@ length(Packages) >= 5805.
 %%=> true
 
 hd(Packages).
-%%=> #{name := <<"a_message">>
+%%=> #{name => <<"a_message">>}
 ```
 
 Get package versions:
@@ -21,7 +21,7 @@ length(Versions) >= 5805.
 %%=> true
 
 hd(Versions).
-%%=> #{name := <<"a_message">>, retired := [], versions := [<<"1.0.0">>]}
+%%=> #{name => <<"a_message">>, retired => [], versions => [<<"1.0.0">>]}
 ```
 
 Get package info:

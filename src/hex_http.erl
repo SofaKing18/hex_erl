@@ -27,7 +27,7 @@ adapter() ->
 adapter(Adapter) when is_atom(Adapter) ->
     application:set_env(hex_erl, http_adapter, Adapter).
 
--spec user_agent() -> string.
+-spec user_agent() -> string().
 user_agent() ->
     user_agent(adapter()).
 

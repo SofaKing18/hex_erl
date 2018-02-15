@@ -5,13 +5,26 @@
 -export([create/2, unpack/1]).
 -define(VERSION, <<"3">>).
 
--type checksum() :: binary().
--type file() :: {string(), binary()}.
--type metadata() :: #{app => binary(), version => version()}.
+-type checksum() :: <<_:256>>.
+-type metadata() :: map().
 -type tarball() :: binary().
--type version() :: binary().
 
--spec create(metadata(), [file()]) -> {ok, tarball(), checksum()}.
+%% @doc
+%% Creates a package tarball.
+%%
+%% Examples:
+%%
+%% ```
+%%     Metadata = #{<<"app">> => <<"foo">>, <<"version">> => <<"1.0.0">>},
+%%     Files = [{"src/foo.erl", <<"-module(foo).">>}],
+%%     {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, Files).
+%%     Tarball.
+%%     %%=> <<86,69,...>>
+%%     Checksum2.
+%%     %%=> <<40,32,...>>
+%% '''
+%% @end
+-spec create(metadata(), [string() | {string(), binary() | string()}]) -> {ok, {tarball(), checksum()}}.
 create(Metadata, Files) ->
     MetaBinary = encode_metadata(Metadata),
     ContentsBinary = create_tarball(Files, [compressed]),
@@ -28,7 +41,20 @@ create(Metadata, Files) ->
     Tarball = create_tarball(OuterFiles, []),
     {ok, {Tarball, Checksum}}.
 
--spec unpack(tarball()) -> {ok, {metadata(), checksum(), [file()]}}.
+%% @doc
+%% Unpacks a package tarball
+%%
+%% Examples:
+%%
+%% ```
+%%     hex_tarball:unpack(Tarball).
+%%     %%=> {ok,{#{<<"app">> => <<"foo">>,
+%%     %%=>        <<"version">> => <<"1.0.0">>,
+%%     %%=>        ...},
+%%     %%=>      <<40,32,...>>,
+%%     %%=>      [{"src/foo.erl",<<"-module(foo).">>}}}
+%% '''
+-spec unpack(tarball()) -> {ok, {metadata(), checksum(), [{string(), binary()}]}}.
 unpack(Tarball) ->
     {ok, OuterFiles} = erl_tar:extract({binary, Tarball}, [memory]),
     {"VERSION", _Version} = lists:keyfind("VERSION", 1, OuterFiles),
@@ -39,7 +65,7 @@ unpack(Tarball) ->
     {ok, Files} = erl_tar:extract({binary, Contents}, [memory, compressed]),
     {ok, {Metadata, Checksum, Files}}.
 
-%% Helpers
+%% Private
 
 create_tarball(Files, Options) ->
     Path = "tmp.tar",

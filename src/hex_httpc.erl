@@ -1,3 +1,4 @@
+%% @private
 -module(hex_httpc).
 -behavior(hex_http).
 -export([get/2, user_agent_string/0]).

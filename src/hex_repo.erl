@@ -1,9 +1,9 @@
 -module(hex_repo).
 -export([api_url/1, repo_url/1, names/1, versions/1, package/2, tarball/3]).
 
--type repo() :: atom() | #{ api_url => string() | nil, repo_url => string() }.
+-type repo() :: hexpm | #{ api_url := string() | nil, repo_url := string() }.
 
--spec api_url(repo()) -> string().
+-spec api_url(repo()) -> string() | nil.
 api_url(Repo) ->
     maps:get(api_url, repo(Repo)).
 
@@ -11,17 +11,23 @@ api_url(Repo) ->
 repo_url(Repo) ->
     maps:get(repo_url, repo(Repo)).
 
--spec names(repo()) -> [map()].
+-spec names(repo()) -> [#{name => binary()}].
 names(Repo) ->
     Body = get(Repo, "/names"),
     hex_registry:decode_names(Body).
 
--spec versions(repo()) -> [map()].
+-spec versions(repo()) ->
+        [#{name => binary(),
+           retired => [hex_tarball:version()],
+           versions => [hex_tarball:version()]}].
 versions(Repo) ->
     Body = get(Repo, "/versions"),
     hex_registry:decode_versions(Body).
 
--spec package(repo(), string()) -> map().
+-spec package(repo(), string()) ->
+        #{releases => [#{checksum => hex_tarball:checksum(),
+                         dependencies => [map()],
+                         version => hex_tarball:version()}]}.
 package(Repo, Name) ->
     Body = get(Repo, "/packages/" ++ Name),
     hex_registry:decode_package(Body).
