@@ -11,7 +11,7 @@ get(Repo, Path) ->
         Url when is_list(Url) ->
             case hex_http:get(Url ++ Path, "application/vnd.hex+erlang") of
                 {ok, {200, _, Body}} ->
-                    binary_to_term(Body);
+                    {ok, binary_to_term(Body)};
 
                 Other ->
                     Other
