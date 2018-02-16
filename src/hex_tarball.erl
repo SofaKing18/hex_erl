@@ -28,7 +28,7 @@
 create(Metadata, Files) ->
     MetaBinary = encode_metadata(Metadata),
     ContentsBinary = create_tarball(Files, [compressed]),
-    Checksum = checksum(MetaBinary, ContentsBinary),
+    Checksum = checksum(?VERSION, MetaBinary, ContentsBinary),
     ChecksumBase16 = encode_base16(Checksum),
 
     OuterFiles = [
@@ -56,14 +56,18 @@ create(Metadata, Files) ->
 %% '''
 -spec unpack(tarball()) -> {ok, {metadata(), checksum(), [{string(), binary()}]}}.
 unpack(Tarball) ->
-    {ok, OuterFiles} = hex_erl_tar:extract({binary, Tarball}, [memory]),
-    {"VERSION", _Version} = lists:keyfind("VERSION", 1, OuterFiles),
-    {"CHECKSUM", Checksum} = lists:keyfind("CHECKSUM", 1, OuterFiles),
-    {"metadata.config", MetaBinary} = lists:keyfind("metadata.config", 1, OuterFiles),
-    {"contents.tar.gz", Contents} = lists:keyfind("contents.tar.gz", 1, OuterFiles),
-    Metadata = decode_metadata(MetaBinary),
-    {ok, Files} = hex_erl_tar:extract({binary, Contents}, [memory, compressed]),
-    {ok, {Metadata, decode_base16(Checksum), Files}}.
+    case hex_erl_tar:extract({binary, Tarball}, [memory]) of
+        {ok, []} ->
+            {error, {tarball, empty}};
+
+        {ok, FilesList} ->
+            Files = maps:from_list(FilesList),
+            State = #{checksum => nil, files => Files, metadata => nil, contents => nil},
+            start(State);
+
+        {error, Reason} ->
+            {error, {tarball, Reason}}
+    end.
 
 %% @doc
 %% Returns human-readable base16-encoded representation of checksum.
@@ -73,15 +77,110 @@ format_checksum(Checksum) ->
 
 %% Private
 
+start(State) ->
+    State1 = check_files(State),
+    State2 = check_version(State1),
+    State3 = check_checksum(State2),
+    finish(State3).
+
+finish({error, _} = Error) ->
+    Error;
+finish(#{files := Files}) ->
+    _Version = maps:get("VERSION", Files),
+    Checksum = maps:get("CHECKSUM", Files),
+    MetaBinary = maps:get("metadata.config", Files),
+    Contents = maps:get("contents.tar.gz", Files),
+    Metadata = decode_metadata(MetaBinary),
+    {ok, ContentsFiles} = hex_erl_tar:extract({binary, Contents}, [memory, compressed]),
+    {ok, {Metadata, decode_base16(Checksum), ContentsFiles}}.
+
+check_files({error, _} = Error) ->
+    Error;
+check_files(#{files := Files} = State) ->
+    RequiredFiles = ["VERSION", "CHECKSUM", "metadata.config", "contents.tar.gz"],
+    case diff_keys(Files, RequiredFiles, []) of
+        ok ->
+            State;
+
+        {error, {missing_keys, Keys}} ->
+            {error, {tarball, {missing_files, Keys}}};
+
+        {error, {unknown_keys, Keys}} ->
+            {error, {tarball, {invalid_files, Keys}}}
+    end.
+
+check_version({error, _} = Error) ->
+    Error;
+check_version(#{files := Files} = State) ->
+    case maps:get("VERSION", Files) of
+        <<"3">> ->
+            State;
+
+        Version ->
+            {error, {unsupported_version, Version}}
+    end.
+
+check_checksum({error, _} = Error) ->
+    Error;
+check_checksum(#{files := Files} = State) ->
+    ChecksumBase16 = maps:get("CHECKSUM", Files),
+    ExpectedChecksum = decode_base16(ChecksumBase16),
+
+    Version = maps:get("VERSION", Files),
+    Meta = maps:get("metadata.config", Files),
+    Contents = maps:get("contents.tar.gz", Files),
+    ActualChecksum = checksum(Version, Meta, Contents),
+
+    if
+        byte_size(ExpectedChecksum) /= 32 ->
+            {error, invalid_checksum};
+
+        ExpectedChecksum == ActualChecksum ->
+            maps:put(checksum, ExpectedChecksum, State);
+
+        true ->
+            {error, {checksum_mismatch, ExpectedChecksum, ActualChecksum}}
+    end.
+
+diff_keys(Map, RequiredKeys, OptionalKeys) ->
+    Keys = maps:keys(Map),
+    MissingKeys = RequiredKeys -- Keys,
+    UnknownKeys = Keys -- (RequiredKeys ++ OptionalKeys),
+
+    case {MissingKeys, UnknownKeys} of
+        {[], []} ->
+            ok;
+
+        {[_ | _], _} ->
+            {error, {missing_keys, MissingKeys}};
+
+        _ ->
+            {error, {unknown_keys, UnknownKeys}}
+    end.
+
 create_tarball(Files, Options) ->
     Path = "tmp.tar",
-    ok = hex_erl_tar:create(Path, Files, Options),
+    {ok, Tar} = hex_erl_tar:open(Path, [write | Options]),
+    add_files(Tar, Files),
+    ok = hex_erl_tar:close(Tar),
     {ok, Tarball} = file:read_file(Path),
     ok = file:delete(Path),
     Tarball.
 
-checksum(MetaString, Contents) ->
-    Blob = <<(?VERSION)/binary, MetaString/binary, Contents/binary>>,
+add_files(Tar, Files) ->
+    lists:map(fun(File) -> add_file(Tar, File) end, Files).
+
+add_file(Tar, {Name, Contents}) ->
+    ok = hex_erl_tar:add(Tar, Contents, Name, tar_opts()).
+
+tar_opts() ->
+    NixEpoch = calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
+    Y2kEpoch = calendar:datetime_to_gregorian_seconds({{2000, 1, 1}, {0, 0, 0}}),
+    Epoch = Y2kEpoch - NixEpoch,
+    [{atime, Epoch}, {mtime, Epoch}, {ctime, Epoch}, {uid, 0}, {gid, 0}].
+
+checksum(Version, MetaString, Contents) ->
+    Blob = <<Version/binary, MetaString/binary, Contents/binary>>,
     crypto:hash(sha256, Blob).
 
 decode_metadata(Binary) when is_binary(Binary) ->
@@ -89,8 +188,33 @@ decode_metadata(Binary) when is_binary(Binary) ->
     case safe_erl_term:string(String) of
         {ok, Tokens, _Line} ->
             Terms = safe_erl_term:terms(Tokens),
-            maps:from_list(Terms)
+            Metadata = maps:from_list(Terms),
+            maybe_update_with(<<"requirements">>, fun normalize_requirements/1, Metadata)
     end.
+
+maybe_update_with(Key, Fun, Map) ->
+    case maps:is_key(Key, Map) of
+        true ->
+            maps:update_with(Key, Fun, Map);
+
+        false ->
+            Map
+    end.
+
+normalize_requirements(Requirements) ->
+    case is_list(Requirements) and is_list(hd(Requirements)) of
+        true ->
+            List = lists:map(fun normalize_requirement/1, Requirements),
+            maps:from_list(List);
+
+        false ->
+            Requirements
+    end.
+
+normalize_requirement(Requirement) ->
+    {_, Name} = lists:keyfind(<<"name">>, 1, Requirement),
+    List = lists:keydelete(<<"name">>, 1, Requirement),
+    {Name, maps:from_list(List)}.
 
 encode_metadata(Meta) ->
     Data = lists:map(fun(MetaPair) ->
