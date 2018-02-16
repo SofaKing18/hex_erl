@@ -70,7 +70,7 @@ unpack(Tarball) ->
     end.
 
 %% @doc
-%% Returns human-readable base16-encoded representation of checksum.
+%% Returns base16-encoded representation of checksum.
 -spec format_checksum(checksum()) -> string().
 format_checksum(Checksum) ->
     encode_base16(Checksum).
