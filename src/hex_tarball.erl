@@ -56,13 +56,13 @@ create(Metadata, Files) ->
 %% '''
 -spec unpack(tarball()) -> {ok, {metadata(), checksum(), [{string(), binary()}]}}.
 unpack(Tarball) ->
-    {ok, OuterFiles} = erl_tar:extract({binary, Tarball}, [memory]),
+    {ok, OuterFiles} = hex_erl_tar:extract({binary, Tarball}, [memory]),
     {"VERSION", _Version} = lists:keyfind("VERSION", 1, OuterFiles),
     {"CHECKSUM", Checksum} = lists:keyfind("CHECKSUM", 1, OuterFiles),
     {"metadata.config", MetaBinary} = lists:keyfind("metadata.config", 1, OuterFiles),
     {"contents.tar.gz", Contents} = lists:keyfind("contents.tar.gz", 1, OuterFiles),
     Metadata = decode_metadata(MetaBinary),
-    {ok, Files} = erl_tar:extract({binary, Contents}, [memory, compressed]),
+    {ok, Files} = hex_erl_tar:extract({binary, Contents}, [memory, compressed]),
     {ok, {Metadata, decode_base16(Checksum), Files}}.
 
 %% @doc
@@ -75,7 +75,7 @@ format_checksum(Checksum) ->
 
 create_tarball(Files, Options) ->
     Path = "tmp.tar",
-    ok = erl_tar:create(Path, Files, Options),
+    ok = hex_erl_tar:create(Path, Files, Options),
     {ok, Tarball} = file:read_file(Path),
     ok = file:delete(Path),
     Tarball.
