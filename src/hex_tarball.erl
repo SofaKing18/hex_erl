@@ -2,7 +2,7 @@
 %%   https://github.com/hexpm/hex/blob/master/lib/hex/tar.ex
 %%   https://github.com/tsloughter/rebar3_hex/blob/master/src/rebar3_hex_tar.erl
 -module(hex_tarball).
--export([create/2, unpack/1]).
+-export([create/2, unpack/1, format_checksum/1]).
 -define(VERSION, <<"3">>).
 
 -type checksum() :: <<_:256>>.
@@ -64,6 +64,12 @@ unpack(Tarball) ->
     Metadata = decode_metadata(MetaBinary),
     {ok, Files} = erl_tar:extract({binary, Contents}, [memory, compressed]),
     {ok, {Metadata, decode_base16(Checksum), Files}}.
+
+%% @doc
+%% Returns human-readable base16-encoded representation of checksum.
+-spec format_checksum(checksum()) -> string().
+format_checksum(Checksum) ->
+    encode_base16(Checksum).
 
 %% Private
 
