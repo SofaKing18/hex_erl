@@ -81,18 +81,22 @@ start(State) ->
     State1 = check_files(State),
     State2 = check_version(State1),
     State3 = check_checksum(State2),
-    finish(State3).
+    State4 = decode_metadata(State3),
+    finish(State4).
 
 finish({error, _} = Error) ->
     Error;
-finish(#{files := Files}) ->
+finish(#{metadata := Metadata, files := Files}) ->
     _Version = maps:get("VERSION", Files),
     Checksum = maps:get("CHECKSUM", Files),
-    MetaBinary = maps:get("metadata.config", Files),
     Contents = maps:get("contents.tar.gz", Files),
-    Metadata = decode_metadata(MetaBinary),
-    {ok, ContentsFiles} = hex_erl_tar:extract({binary, Contents}, [memory, compressed]),
-    {ok, {Metadata, decode_base16(Checksum), ContentsFiles}}.
+    case hex_erl_tar:extract({binary, Contents}, [memory, compressed]) of
+        {ok, ContentsFiles} ->
+            {ok, {Metadata, decode_base16(Checksum), ContentsFiles}};
+
+        {error, Reason} ->
+            {error, {inner_tarball, Reason}}
+    end.
 
 check_files({error, _} = Error) ->
     Error;
@@ -139,7 +143,30 @@ check_checksum(#{files := Files} = State) ->
             maps:put(checksum, ExpectedChecksum, State);
 
         true ->
-            {error, {checksum_mismatch, ExpectedChecksum, ActualChecksum}}
+            {error, {checksum_mismatch, ExpectedChecksum, format_checksum(ActualChecksum)}}
+    end.
+
+decode_metadata({error, _} = Error) ->
+    Error;
+decode_metadata(#{files := #{"metadata.config" := Binary}} = State) when is_binary(Binary) ->
+    String = binary_to_list(Binary),
+    case safe_erl_term:string(String) of
+        {ok, Tokens, _Line} ->
+            try
+                Terms = safe_erl_term:terms(Tokens),
+                Metadata = maps:from_list(Terms),
+                Metadata2 = maybe_update_with(<<"requirements">>, fun normalize_requirements/1, Metadata),
+                maps:put(metadata, Metadata2, State)
+            catch
+                error:function_clause ->
+                    {error, {metadata, invalid_terms}};
+
+                error:badarg ->
+                    {error, {metadata, not_key_value}}
+            end;
+
+        {error, {_Line, safe_erl_term, Reason}, _Line2} ->
+            {error, {metadata, Reason}}
     end.
 
 diff_keys(Map, RequiredKeys, OptionalKeys) ->
@@ -182,15 +209,6 @@ tar_opts() ->
 checksum(Version, MetaString, Contents) ->
     Blob = <<Version/binary, MetaString/binary, Contents/binary>>,
     crypto:hash(sha256, Blob).
-
-decode_metadata(Binary) when is_binary(Binary) ->
-    String = binary_to_list(Binary),
-    case safe_erl_term:string(String) of
-        {ok, Tokens, _Line} ->
-            Terms = safe_erl_term:terms(Tokens),
-            Metadata = maps:from_list(Terms),
-            maybe_update_with(<<"requirements">>, fun normalize_requirements/1, Metadata)
-    end.
 
 maybe_update_with(Key, Fun, Map) ->
     case maps:is_key(Key, Map) of
