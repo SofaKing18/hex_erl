@@ -222,12 +222,16 @@ maybe_update_with(Key, Fun, Map) ->
 normalize_requirements(Requirements) ->
     case is_list(Requirements) and is_list(hd(Requirements)) of
         true ->
-            List = lists:map(fun normalize_requirement/1, Requirements),
-            maps:from_list(List);
+            try_into_map(fun normalize_requirement/1, Requirements);
 
         false ->
-            Requirements
+            try_into_map(fun({Key, Value}) ->
+                                 {Key, try_into_map(fun(X) -> X end, Value)} end,
+                         Requirements)
     end.
+
+try_into_map(Fun, List) ->
+    maps:from_list(lists:map(Fun, List)).
 
 normalize_requirement(Requirement) ->
     {_, Name} = lists:keyfind(<<"name">>, 1, Requirement),
