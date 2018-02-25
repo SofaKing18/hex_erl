@@ -8,6 +8,7 @@
 -type checksum() :: <<_:256>>.
 -type metadata() :: map().
 -type tarball() :: binary().
+-type files() :: map().
 
 %% @doc
 %% Creates a package tarball.
@@ -24,19 +25,19 @@
 %%     %%=> <<40,32,...>>
 %% '''
 %% @end
--spec create(metadata(), [string() | {string(), binary() | string()}]) -> {ok, {tarball(), checksum()}}.
+-spec create(metadata(), files()) -> {ok, {tarball(), checksum()}}.
 create(Metadata, Files) ->
     MetaBinary = encode_metadata(Metadata),
     ContentsBinary = create_tarball(Files, [compressed]),
     Checksum = checksum(?VERSION, MetaBinary, ContentsBinary),
     ChecksumBase16 = encode_base16(Checksum),
 
-    OuterFiles = [
-                  {"VERSION", ?VERSION},
-                  {"CHECKSUM", ChecksumBase16},
-                  {"metadata.config", MetaBinary},
-                  {"contents.tar.gz", ContentsBinary}
-                 ],
+    OuterFiles = #{
+      "VERSION" => ?VERSION,
+      "CHECKSUM" => ChecksumBase16,
+      "metadata.config" => MetaBinary,
+      "contents.tar.gz" => ContentsBinary
+    },
 
     Tarball = create_tarball(OuterFiles, []),
     {ok, {Tarball, Checksum}}.
@@ -54,7 +55,7 @@ create(Metadata, Files) ->
 %%     %%=>      <<40,32,...>>,
 %%     %%=>      [{"src/foo.erl",<<"-module(foo).">>}}}
 %% '''
--spec unpack(tarball()) -> {ok, {metadata(), checksum(), [{string(), binary()}]}}.
+-spec unpack(tarball()) -> {ok, {metadata(), checksum(), files()}}.
 unpack(Tarball) ->
     case hex_erl_tar:extract({binary, Tarball}, [memory]) of
         {ok, []} ->
@@ -91,7 +92,8 @@ finish(#{metadata := Metadata, files := Files}) ->
     Checksum = maps:get("CHECKSUM", Files),
     Contents = maps:get("contents.tar.gz", Files),
     case hex_erl_tar:extract({binary, Contents}, [memory, compressed]) of
-        {ok, ContentsFiles} ->
+        {ok, ContentsFileList} ->
+            ContentsFiles = maps:from_list(ContentsFileList),
             {ok, {Metadata, decode_base16(Checksum), ContentsFiles}};
 
         {error, Reason} ->
@@ -121,7 +123,7 @@ check_version(#{files := Files} = State) ->
             State;
 
         Version ->
-            {error, {unsupported_version, Version}}
+            {error, {tarball, {bad_version, Version}}}
     end.
 
 check_checksum({error, _} = Error) ->
@@ -137,13 +139,13 @@ check_checksum(#{files := Files} = State) ->
 
     if
         byte_size(ExpectedChecksum) /= 32 ->
-            {error, invalid_checksum};
+            {error, {tarball, invalid_checksum}};
 
         ExpectedChecksum == ActualChecksum ->
             maps:put(checksum, ExpectedChecksum, State);
 
         true ->
-            {error, {checksum_mismatch, ExpectedChecksum, format_checksum(ActualChecksum)}}
+            {error, {tarball, {checksum_mismatch, ExpectedChecksum, format_checksum(ActualChecksum)}}}
     end.
 
 decode_metadata({error, _} = Error) ->
@@ -178,11 +180,11 @@ diff_keys(Map, RequiredKeys, OptionalKeys) ->
         {[], []} ->
             ok;
 
-        {[_ | _], _} ->
-            {error, {missing_keys, MissingKeys}};
+        {_, [_ | _]} ->
+            {error, {unknown_keys, UnknownKeys}};
 
         _ ->
-            {error, {unknown_keys, UnknownKeys}}
+            {error, {missing_keys, MissingKeys}}
     end.
 
 create_tarball(Files, Options) ->
@@ -195,7 +197,7 @@ create_tarball(Files, Options) ->
     Tarball.
 
 add_files(Tar, Files) ->
-    lists:map(fun(File) -> add_file(Tar, File) end, Files).
+    maps:map(fun(Filename, Binary) -> add_file(Tar, {Filename, Binary}) end, Files).
 
 add_file(Tar, {Name, Contents}) ->
     ok = hex_erl_tar:add(Tar, Contents, Name, tar_opts()).
