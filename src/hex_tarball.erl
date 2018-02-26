@@ -33,12 +33,12 @@ create(Metadata, Files) ->
     Checksum = checksum(?VERSION, MetaBinary, ContentsBinary),
     ChecksumBase16 = encode_base16(Checksum),
 
-    OuterFiles = #{
-      "VERSION" => ?VERSION,
-      "CHECKSUM" => ChecksumBase16,
-      "metadata.config" => MetaBinary,
-      "contents.tar.gz" => ContentsBinary
-    },
+    OuterFiles = [
+      {"VERSION", ?VERSION},
+      {"CHECKSUM", ChecksumBase16},
+      {"metadata.config", MetaBinary},
+      {"contents.tar.gz", ContentsBinary}
+    ],
 
     Tarball = create_tarball(OuterFiles, []),
 
@@ -85,9 +85,6 @@ unpack(Tarball) ->
 -spec format_checksum(checksum()) -> string().
 format_checksum(Checksum) ->
     encode_base16(Checksum).
-
-% @inner_error "inner tarball error, "
-% @metadata_error "error reading package metadata, "
 
 format_error({tarball, empty}) -> "empty tarball";
 format_error({tarball, too_big}) -> "tarball is too big";
@@ -188,9 +185,7 @@ decode_metadata(#{files := #{"metadata.config" := Binary}} = State) when is_bina
         {ok, Tokens, _Line} ->
             try
                 Terms = safe_erl_term:terms(Tokens),
-                Metadata = maps:from_list(Terms),
-                Metadata2 = maybe_update_with(<<"requirements">>, fun normalize_requirements/1, Metadata),
-                maps:put(metadata, Metadata2, State)
+                maps:put(metadata, normalize_metadata(Terms), State)
             catch
                 error:function_clause ->
                     {error, {metadata, invalid_terms}};
@@ -202,6 +197,10 @@ decode_metadata(#{files := #{"metadata.config" := Binary}} = State) when is_bina
         {error, {_Line, safe_erl_term, Reason}, _Line2} ->
             {error, {metadata, Reason}}
     end.
+
+normalize_metadata(Terms) ->
+    Metadata = maps:from_list(Terms),
+    maybe_update_with(<<"requirements">>, fun normalize_requirements/1, Metadata).
 
 diff_keys(Map, RequiredKeys, OptionalKeys) ->
     Keys = maps:keys(Map),
@@ -221,12 +220,54 @@ diff_keys(Map, RequiredKeys, OptionalKeys) ->
 
 create_tarball(Files, Options) ->
     Path = "tmp.tar",
-    {ok, Tar} = hex_erl_tar:open(Path, [write | Options]),
+    {ok, Tar} = hex_erl_tar:open(Path, [write]),
     add_files(Tar, Files),
     ok = hex_erl_tar:close(Tar),
     {ok, Tarball} = file:read_file(Path),
     ok = file:delete(Path),
-    Tarball.
+
+    case proplists:get_bool(compressed, Options) of
+        true ->
+            gzip(Tarball);
+
+        false ->
+            Tarball
+    end.
+
+%% Reproducible gzip by not setting mtime and OS
+%%
+%% From https://tools.ietf.org/html/rfc1952
+%%
+%% +---+---+---+---+---+---+---+---+---+---+
+%% |ID1|ID2|CM |FLG|     MTIME     |XFL|OS | (more-->)
+%% +---+---+---+---+---+---+---+---+---+---+
+%%
+%% +=======================+
+%% |...compressed blocks...| (more-->)
+%% +=======================+
+%%
+%% +---+---+---+---+---+---+---+---+
+%% |     CRC32     |     ISIZE     |
+%% +---+---+---+---+---+---+---+---+
+gzip(Uncompressed) ->
+    Compressed = gzip_no_header(Uncompressed),
+    Header = <<31, 139, 8, 0, 0, 0, 0, 0, 0, 0>>,
+    Crc = erlang:crc32(Uncompressed),
+    Size = byte_size(Uncompressed),
+    Trailer = <<Crc:32/little, Size:32/little>>,
+    iolist_to_binary([Header, Compressed, Trailer]).
+
+gzip_no_header(Uncompressed) ->
+    Zstream = zlib:open(),
+
+    try
+        zlib:deflateInit(Zstream, default, deflated, -15, 8, default),
+        Compressed = zlib:deflate(Zstream, Uncompressed, finish),
+        zlib:deflateEnd(Zstream),
+        iolist_to_binary(Compressed)
+    after
+        zlib:close(Zstream)
+    end.
 
 add_files(Tar, Files) when is_map(Files) ->
     maps:map(fun(Filename, Binary) -> add_file(Tar, {Filename, Binary}) end, Files);

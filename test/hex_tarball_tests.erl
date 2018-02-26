@@ -39,25 +39,25 @@ unpack_error_handling_test() ->
 
     Files1 = OuterFiles#{
       "metadata.config" => <<"ok $">>,
-      "CHECKSUM" => <<"1DF62C933B461E24877D01C0C923960D983981EB093F4EFC8D9CAC1A26675FF9">>
+      "CHECKSUM" => <<"1BB37F9A91F9E4A3667A4527930187ACF6B9714C0DE7EADD55DC31BE5CFDD98C">>
     },
     {error, {metadata, {illegal, "$"}}} = unpack_files(Files1),
 
     Files2 = OuterFiles#{
       "metadata.config" => <<"ok[">>,
-      "CHECKSUM" => <<"F13D4C213ECBC7101A59D63077FB0E4A276409FE4E766B3D24C046BE051AABC2">>
+      "CHECKSUM" => <<"0423D201115A49644F8BD4F216E666AF823CFE759853D9994CE9B652C5E604D9">>
     },
     {error, {metadata, invalid_terms}} = unpack_files(Files2),
 
     Files3 = OuterFiles#{
       "metadata.config" => <<"asdf.">>,
-      "CHECKSUM" => <<"898A0FDF35F59DC0CEDFCFE8FB7FC9EE4BCB82FF3BE64AB6152BB2567F30DF5A">>
+      "CHECKSUM" => <<"F80D9B63D52695C6AC165D41F0F42F8D19152BE84D11FC2E5093FEC53CD4E3D9">>
     },
     {error, {metadata, {user, "illegal atom asdf"}}} = unpack_files(Files3),
 
     Files4 = OuterFiles#{
       "metadata.config" => <<"ok.">>,
-      "CHECKSUM" => <<"6D6CD6DCABA57CBCBBE0E602629E3AA1605F11B26EA79BECE2DC92FFDF500E2D">>
+      "CHECKSUM" => <<"5E891D99F011F3DF8AB42E3B16420034C63CEC771B548F5E430057D13B62EF2B">>
     },
     {error, {metadata, not_key_value}} = unpack_files(Files4),
 
