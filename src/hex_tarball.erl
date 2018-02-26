@@ -2,7 +2,7 @@
 %%   https://github.com/hexpm/hex/blob/master/lib/hex/tar.ex
 %%   https://github.com/tsloughter/rebar3_hex/blob/master/src/rebar3_hex_tar.erl
 -module(hex_tarball).
--export([create/2, unpack/1, format_checksum/1]).
+-export([create/2, unpack/1, format_checksum/1, format_error/1]).
 -define(VERSION, <<"3">>).
 -define(TARBALL_MAX_SIZE, 8 * 1024 * 1024).
 
@@ -85,6 +85,28 @@ unpack(Tarball) ->
 -spec format_checksum(checksum()) -> string().
 format_checksum(Checksum) ->
     encode_base16(Checksum).
+
+% @inner_error "inner tarball error, "
+% @metadata_error "error reading package metadata, "
+
+format_error({tarball, empty}) -> "empty tarball";
+format_error({tarball, too_big}) -> "tarball is too big";
+format_error({tarball, {missing_files, Files}}) -> io_lib:format("missing files: ~p", [Files]);
+format_error({tarball, {invalid_files, Files}}) -> io_lib:format("invalid files: ~p", [Files]);
+format_error({tarball, {bad_version, Vsn}}) -> io_lib:format("unsupported version: ~p", [Vsn]);
+format_error({tarball, invalid_checksum}) -> "invalid tarball checksum";
+format_error({tarball, Reason}) -> "tarball error, " ++ hex_erl_tar:format_error(Reason);
+format_error({inner_tarball, Reason}) -> "inner tarball error, " ++ hex_erl_tar:format_error(Reason);
+format_error({metadata, invalid_terms}) -> "error reading package metadata: invalid terms";
+format_error({metadata, not_key_value}) -> "error reading package metadata: not in key-value format";
+format_error({metadata, Reason}) -> "error reading package metadata" ++ safe_erl_term:format_error(Reason);
+
+format_error({checksum_mismatch, ExpectedChecksum, ActualChecksum}) ->
+    io_lib:format(
+        "tarball checksum mismatch~n~n" ++
+        "Expected (base16-encoded): ~s~n" ++
+        "Actual   (base16-encoded): ~s",
+        [encode_base16(ExpectedChecksum), encode_base16(ActualChecksum)]).
 
 %% Private
 
