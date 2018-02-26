@@ -231,10 +231,12 @@ create_tarball(Files, Options) ->
 add_files(Tar, Files) when is_map(Files) ->
     maps:map(fun(Filename, Binary) -> add_file(Tar, {Filename, Binary}) end, Files);
 add_files(Tar, Files) when is_list(Files) ->
-    lists:map(fun({Filename, Binary}) -> add_file(Tar, {Filename, Binary}) end, Files).
+    lists:map(fun(File) -> add_file(Tar, File) end, Files).
 
-add_file(Tar, {Name, Contents}) ->
-    ok = hex_erl_tar:add(Tar, Contents, Name, tar_opts()).
+add_file(Tar, {Filename, Contents}) ->
+    ok = hex_erl_tar:add(Tar, Contents, Filename, tar_opts());
+add_file(Tar, Filename) when is_list(Filename) ->
+    ok = hex_erl_tar:add(Tar, Filename, tar_opts()).
 
 tar_opts() ->
     NixEpoch = calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
