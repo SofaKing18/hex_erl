@@ -4,6 +4,7 @@
 -module(hex_tarball).
 -export([create/2, unpack/1, format_checksum/1]).
 -define(VERSION, <<"3">>).
+-define(TARBALL_MAX_SIZE, 8 * 1024 * 1024).
 
 -type checksum() :: <<_:256>>.
 -type metadata() :: map().
@@ -40,7 +41,14 @@ create(Metadata, Files) ->
     },
 
     Tarball = create_tarball(OuterFiles, []),
-    {ok, {Tarball, Checksum}}.
+
+    case byte_size(Tarball) > ?TARBALL_MAX_SIZE of
+        true ->
+            {error, {tarball, too_big}};
+
+        false ->
+            {ok, {Tarball, Checksum}}
+    end.
 
 %% @doc
 %% Unpacks a package tarball
@@ -56,6 +64,9 @@ create(Metadata, Files) ->
 %%     %%=>      [{"src/foo.erl",<<"-module(foo).">>}}}
 %% '''
 -spec unpack(tarball()) -> {ok, {metadata(), checksum(), files()}}.
+unpack(Tarball) when byte_size(Tarball) > ?TARBALL_MAX_SIZE ->
+    {error, {tarball, too_big}};
+
 unpack(Tarball) ->
     case hex_erl_tar:extract({binary, Tarball}, [memory]) of
         {ok, []} ->
