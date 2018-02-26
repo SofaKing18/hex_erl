@@ -8,7 +8,7 @@
 -type checksum() :: <<_:256>>.
 -type metadata() :: map().
 -type tarball() :: binary().
--type files() :: map().
+-type files() :: #{Filename :: string() => Contents :: binary()}.
 
 %% @doc
 %% Creates a package tarball.
@@ -25,7 +25,7 @@
 %%     %%=> <<40,32,...>>
 %% '''
 %% @end
--spec create(metadata(), files()) -> {ok, {tarball(), checksum()}}.
+-spec create(metadata(), [Filename :: string()] | files()) -> {ok, {tarball(), checksum()}}.
 create(Metadata, Files) ->
     MetaBinary = encode_metadata(Metadata),
     ContentsBinary = create_tarball(Files, [compressed]),
@@ -61,9 +61,8 @@ unpack(Tarball) ->
         {ok, []} ->
             {error, {tarball, empty}};
 
-        {ok, FilesList} ->
-            Files = maps:from_list(FilesList),
-            State = #{checksum => nil, files => Files, metadata => nil, contents => nil},
+        {ok, Files} ->
+            State = #{checksum => nil, files => maps:from_list(Files), metadata => nil, contents => nil},
             start(State);
 
         {error, Reason} ->
@@ -196,8 +195,10 @@ create_tarball(Files, Options) ->
     ok = file:delete(Path),
     Tarball.
 
-add_files(Tar, Files) ->
-    maps:map(fun(Filename, Binary) -> add_file(Tar, {Filename, Binary}) end, Files).
+add_files(Tar, Files) when is_map(Files) ->
+    maps:map(fun(Filename, Binary) -> add_file(Tar, {Filename, Binary}) end, Files);
+add_files(Tar, Files) when is_list(Files) ->
+    lists:map(fun({Filename, Binary}) -> add_file(Tar, {Filename, Binary}) end, Files).
 
 add_file(Tar, {Name, Contents}) ->
     ok = hex_erl_tar:add(Tar, Contents, Name, tar_opts()).
