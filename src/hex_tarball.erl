@@ -57,13 +57,11 @@ create(Metadata, Files) ->
 %%
 %% ```
 %%     hex_tarball:unpack(Tarball).
-%%     %%=> {ok,{#{<<"app">> => <<"foo">>,
-%%     %%=>        <<"version">> => <<"1.0.0">>,
-%%     %%=>        ...},
-%%     %%=>      <<40,32,...>>,
-%%     %%=>      [{"src/foo.erl",<<"-module(foo).">>}}}
+%%     %%=> {ok,#{checksum => <<40,32,...>>,
+%%     %%=>       metadata => #{<<"app">> => <<"foo">>, ...},
+%%     %%=>       files => [{"src/foo.erl",<<"-module(foo).">>]}}
 %% '''
--spec unpack(tarball()) -> {ok, {metadata(), checksum(), files()}}.
+-spec unpack(tarball()) -> {ok, #{checksum => checksum(), metadata => metadata(), files => files()}}.
 unpack(Tarball) when byte_size(Tarball) > ?TARBALL_MAX_SIZE ->
     {error, {tarball, too_big}};
 
@@ -118,12 +116,11 @@ finish({error, _} = Error) ->
     Error;
 finish(#{metadata := Metadata, files := Files}) ->
     _Version = maps:get("VERSION", Files),
-    Checksum = maps:get("CHECKSUM", Files),
-    Contents = maps:get("contents.tar.gz", Files),
-    case hex_erl_tar:extract({binary, Contents}, [memory, compressed]) of
-        {ok, ContentsFileList} ->
-            ContentsFiles = maps:from_list(ContentsFileList),
-            {ok, {Metadata, decode_base16(Checksum), ContentsFiles}};
+    Checksum = decode_base16(maps:get("CHECKSUM", Files)),
+    ContentsBinary = maps:get("contents.tar.gz", Files),
+    case hex_erl_tar:extract({binary, ContentsBinary}, [memory, compressed]) of
+        {ok, Contents} ->
+            {ok, #{checksum => Checksum, metadata => Metadata, files => Contents}};
 
         {error, Reason} ->
             {error, {inner_tarball, Reason}}

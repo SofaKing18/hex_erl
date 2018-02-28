@@ -3,14 +3,14 @@
 
 sanity_test() ->
     Metadata = #{<<"app">> => <<"foo">>, <<"version">> => <<"1.0.0">>},
-    Files = #{"src/foo.erl" => <<"-module(foo).">>},
+    Files = [{"src/foo.erl", <<"-module(foo).">>}],
     {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, Files),
-    {ok, {Metadata, Checksum, Files}} = hex_tarball:unpack(Tarball),
+    {ok, #{checksum := Checksum, metadata := Metadata, files := Files}} = hex_tarball:unpack(Tarball),
     ok.
 
 unpack_error_handling_test() ->
-    {ok, {Tar, Checksum}} = hex_tarball:create(#{"name" => <<"foo">>}, #{"rebar.config" => <<"">>}),
-    {ok, {_, Checksum, _}} = hex_tarball:unpack(Tar),
+    {ok, {Tar, Checksum}} = hex_tarball:create(#{"name" => <<"foo">>}, [{"rebar.config", <<"">>}]),
+    {ok, #{checksum := Checksum}} = hex_tarball:unpack(Tar),
     {ok, OuterFileList} = hex_erl_tar:extract({binary, Tar}, [memory]),
     OuterFiles = maps:from_list(OuterFileList),
 
