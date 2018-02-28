@@ -297,7 +297,7 @@ maybe_update_with(Key, Fun, Map) ->
     end.
 
 normalize_requirements(Requirements) ->
-    case is_list(Requirements) and is_list(hd(Requirements)) of
+    case is_list(Requirements) andalso (Requirements /= []) andalso is_list(hd(Requirements)) of
         true ->
             try_into_map(fun normalize_requirement/1, Requirements);
 
