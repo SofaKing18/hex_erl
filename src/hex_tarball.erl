@@ -2,7 +2,7 @@
 %%   https://github.com/hexpm/hex/blob/master/lib/hex/tar.ex
 %%   https://github.com/tsloughter/rebar3_hex/blob/master/src/rebar3_hex_tar.erl
 -module(hex_tarball).
--export([create/2, unpack/1, format_checksum/1, format_error/1]).
+-export([create/2, unpack/1, format_checksum/1, format_error/1, gzip/1]).
 -define(VERSION, <<"3">>).
 -define(TARBALL_MAX_SIZE, 8 * 1024 * 1024).
 
