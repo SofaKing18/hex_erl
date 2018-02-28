@@ -6,10 +6,11 @@
 -define(VERSION, <<"3">>).
 -define(TARBALL_MAX_SIZE, 8 * 1024 * 1024).
 
--type checksum() :: <<_:256>>.
+-type checksum() :: binary().
+-type contents() :: #{Filename :: string() => Contents :: binary()}.
+-type files() :: [Filename :: string()] | contents().
 -type metadata() :: map().
 -type tarball() :: binary().
--type files() :: #{Filename :: string() => Contents :: binary()}.
 
 %% @doc
 %% Creates a package tarball.
@@ -26,7 +27,7 @@
 %%     %%=> <<40,32,...>>
 %% '''
 %% @end
--spec create(metadata(), [Filename :: string()] | files()) -> {ok, {tarball(), checksum()}}.
+-spec create(metadata(), files()) -> {ok, {tarball(), checksum()}}.
 create(Metadata, Files) ->
     MetaBinary = encode_metadata(Metadata),
     ContentsBinary = create_tarball(Files, [compressed]),
@@ -61,7 +62,7 @@ create(Metadata, Files) ->
 %%     %%=>       metadata => #{<<"app">> => <<"foo">>, ...},
 %%     %%=>       files => [{"src/foo.erl",<<"-module(foo).">>]}}
 %% '''
--spec unpack(tarball()) -> {ok, #{checksum => checksum(), metadata => metadata(), files => files()}}.
+-spec unpack(tarball()) -> {ok, #{checksum => checksum(), metadata => metadata(), contents => contents()}}.
 unpack(Tarball) when byte_size(Tarball) > ?TARBALL_MAX_SIZE ->
     {error, {tarball, too_big}};
 
@@ -120,7 +121,7 @@ finish(#{metadata := Metadata, files := Files}) ->
     ContentsBinary = maps:get("contents.tar.gz", Files),
     case hex_erl_tar:extract({binary, ContentsBinary}, [memory, compressed]) of
         {ok, Contents} ->
-            {ok, #{checksum => Checksum, metadata => Metadata, files => Contents}};
+            {ok, #{checksum => Checksum, metadata => Metadata, contents => Contents}};
 
         {error, Reason} ->
             {error, {inner_tarball, Reason}}
@@ -159,9 +160,9 @@ check_checksum(#{files := Files} = State) ->
     ExpectedChecksum = decode_base16(ChecksumBase16),
 
     Version = maps:get("VERSION", Files),
-    Meta = maps:get("metadata.config", Files),
-    Contents = maps:get("contents.tar.gz", Files),
-    ActualChecksum = checksum(Version, Meta, Contents),
+    MetadataBinary = maps:get("metadata.config", Files),
+    ContentsBinary = maps:get("contents.tar.gz", Files),
+    ActualChecksum = checksum(Version, MetadataBinary, ContentsBinary),
 
     if
         byte_size(ExpectedChecksum) /= 32 ->
@@ -282,8 +283,8 @@ tar_opts() ->
     Epoch = Y2kEpoch - NixEpoch,
     [{atime, Epoch}, {mtime, Epoch}, {ctime, Epoch}, {uid, 0}, {gid, 0}].
 
-checksum(Version, MetaString, Contents) ->
-    Blob = <<Version/binary, MetaString/binary, Contents/binary>>,
+checksum(Version, MetadataBinary, ContentsBinary) ->
+    Blob = <<Version/binary, MetadataBinary/binary, ContentsBinary/binary>>,
     crypto:hash(sha256, Blob).
 
 maybe_update_with(Key, Fun, Map) ->
