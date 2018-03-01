@@ -17,6 +17,7 @@ disk_test() ->
         Metadata = #{<<"app">> => <<"foo">>, <<"version">> => <<"1.0.0">>},
         Files = [{"foo.erl", Dir ++ "/pkg/foo.erl"}],
         {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, Files),
+        <<"12250832D707947ABCC43AC265C1D8FB08285FAA2E920C7450C4D2392675B82F">> = hex_tarball:format_checksum(Checksum),
         {ok, #{checksum := Checksum, metadata := Metadata}} = hex_tarball:unpack(Tarball, Dir ++ "/unpack"),
         {ok, <<"-module(foo).">>} = file:read_file(Dir ++ "/unpack/foo.erl"),
         {ok, <<"{<<\"app\">>,<<\"foo\">>}.\n{<<\"version\">>,<<\"1.0.0\">>}.\n">>} =
