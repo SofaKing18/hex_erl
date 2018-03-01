@@ -20,15 +20,6 @@ disk_test() ->
         {ok, <<"-module(foo).">>} = file:read_file(Dir ++ "/unpack/foo.erl")
     end).
 
-in_tmp(F) ->
-    Dir = "tmp",
-    [] = rm_rf(Dir),
-    ok = file:make_dir(Dir),
-    apply(F, [Dir]).
-
-rm_rf(Path) ->
-    os:cmd("rm -rf " ++ Path).
-
 unpack_error_handling_test() ->
     {ok, {Tarball, Checksum}} = hex_tarball:create(#{"name" => <<"foo">>}, [{"rebar.config", <<"">>}]),
     {ok, #{checksum := Checksum}} = hex_tarball:unpack(Tarball, memory),
@@ -97,3 +88,13 @@ unpack_files(Files) ->
     ok = hex_erl_tar:create("test.tar", FileList, [write]),
     {ok, Binary} = file:read_file("test.tar"),
     hex_tarball:unpack(Binary, memory).
+
+in_tmp(F) ->
+    Dir = "tmp",
+    ok = rm_rf(Dir),
+    ok = file:make_dir(Dir),
+    apply(F, [Dir]).
+
+rm_rf(Path) ->
+    [] = os:cmd("rm -rf " ++ Path),
+    ok.

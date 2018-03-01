@@ -13,6 +13,10 @@
 -type metadata() :: map().
 -type tarball() :: binary().
 
+%%====================================================================
+%% API functions
+%%====================================================================
+
 %% @doc
 %% Creates a package tarball.
 %%
@@ -30,15 +34,15 @@
 %% @end
 -spec create(metadata(), files()) -> {ok, {tarball(), checksum()}}.
 create(Metadata, Files) ->
-    MetaBinary = encode_metadata(Metadata),
+    MetadataBinary = encode_metadata(Metadata),
     ContentsBinary = create_tarball(Files, [compressed]),
-    Checksum = checksum(?VERSION, MetaBinary, ContentsBinary),
+    Checksum = checksum(?VERSION, MetadataBinary, ContentsBinary),
     ChecksumBase16 = encode_base16(Checksum),
 
     OuterFiles = [
       {"VERSION", ?VERSION},
       {"CHECKSUM", ChecksumBase16},
-      {"metadata.config", MetaBinary},
+      {"metadata.config", MetadataBinary},
       {"contents.tar.gz", ContentsBinary}
     ],
 
@@ -53,7 +57,7 @@ create(Metadata, Files) ->
     end.
 
 %% @doc
-%% Unpacks a package tarball
+%% Unpacks a package tarball.
 %%
 %% Examples:
 %%
@@ -82,14 +86,13 @@ unpack(Tarball, Output) ->
             {error, {tarball, empty}};
 
         {ok, Files} ->
-            State = #{
+            start_unpack(#{
                 checksum => nil,
                 contents => nil,
                 files => maps:from_list(Files),
                 metadata => nil,
                 output => Output
-            },
-            start(State);
+            });
 
         {error, Reason} ->
             {error, {tarball, Reason}}
@@ -101,6 +104,9 @@ unpack(Tarball, Output) ->
 format_checksum(Checksum) ->
     encode_base16(Checksum).
 
+%% @doc
+%% Converts an error reason term to a human-readable error message string.
+-spec format_error(term()) -> string().
 format_error({tarball, empty}) -> "empty tarball";
 format_error({tarball, too_big}) -> "tarball is too big";
 format_error({tarball, {missing_files, Files}}) -> io_lib:format("missing files: ~p", [Files]);
@@ -120,22 +126,35 @@ format_error({checksum_mismatch, ExpectedChecksum, ActualChecksum}) ->
         "Actual   (base16-encoded): ~s",
         [encode_base16(ExpectedChecksum), encode_base16(ActualChecksum)]).
 
-%% Private
+%%====================================================================
+%% Internal functions
+%%====================================================================
 
-start(State) ->
+checksum(Version, MetadataBinary, ContentsBinary) ->
+    Blob = <<Version/binary, MetadataBinary/binary, ContentsBinary/binary>>,
+    crypto:hash(sha256, Blob).
+
+encode_metadata(Meta) ->
+    Data = lists:map(fun(MetaPair) ->
+        String = io_lib_pretty:print(binarify(MetaPair), [{encoding, utf8}]),
+        unicode:characters_to_binary([String, ".\n"])
+      end, maps:to_list(Meta)),
+    iolist_to_binary(Data).
+
+start_unpack(State) ->
     State1 = check_files(State),
     State2 = check_version(State1),
     State3 = check_checksum(State2),
     State4 = decode_metadata(State3),
-    finish(State4).
+    finish_unpack(State4).
 
-finish({error, _} = Error) ->
+finish_unpack({error, _} = Error) ->
     Error;
-finish(#{metadata := Metadata, files := Files, output := Output}) ->
+finish_unpack(#{metadata := Metadata, files := Files, output := Output}) ->
     _Version = maps:get("VERSION", Files),
     Checksum = decode_base16(maps:get("CHECKSUM", Files)),
     ContentsBinary = maps:get("contents.tar.gz", Files),
-    case do_unpack(ContentsBinary, Output) of
+    case unpack_tarball(ContentsBinary, Output) of
         ok ->
             {ok, #{checksum => Checksum, metadata => Metadata}};
 
@@ -145,11 +164,6 @@ finish(#{metadata := Metadata, files := Files, output := Output}) ->
         {error, Reason} ->
             {error, {inner_tarball, Reason}}
     end.
-
-do_unpack(ContentsBinary, memory) ->
-    hex_erl_tar:extract({binary, ContentsBinary}, [memory, compressed]);
-do_unpack(ContentsBinary, Output) ->
-    hex_erl_tar:extract({binary, ContentsBinary}, [{cwd, Output}, compressed]).
 
 check_files({error, _} = Error) ->
     Error;
@@ -224,21 +238,30 @@ normalize_metadata(Terms) ->
     Metadata = maps:from_list(Terms),
     maybe_update_with(<<"requirements">>, fun normalize_requirements/1, Metadata).
 
-diff_keys(Map, RequiredKeys, OptionalKeys) ->
-    Keys = maps:keys(Map),
-    MissingKeys = RequiredKeys -- Keys,
-    UnknownKeys = Keys -- (RequiredKeys ++ OptionalKeys),
+normalize_requirements(Requirements) ->
+    case is_list(Requirements) andalso (Requirements /= []) andalso is_list(hd(Requirements)) of
+        true ->
+            try_into_map(fun normalize_requirement/1, Requirements);
 
-    case {MissingKeys, UnknownKeys} of
-        {[], []} ->
-            ok;
-
-        {_, [_ | _]} ->
-            {error, {unknown_keys, UnknownKeys}};
-
-        _ ->
-            {error, {missing_keys, MissingKeys}}
+        false ->
+            try_into_map(fun({Key, Value}) ->
+                                 {Key, try_into_map(fun(X) -> X end, Value)} end,
+                         Requirements)
     end.
+
+normalize_requirement(Requirement) ->
+    {_, Name} = lists:keyfind(<<"name">>, 1, Requirement),
+    List = lists:keydelete(<<"name">>, 1, Requirement),
+    {Name, maps:from_list(List)}.
+
+%%====================================================================
+%% Tar Helpers
+%%====================================================================
+
+unpack_tarball(ContentsBinary, memory) ->
+    hex_erl_tar:extract({binary, ContentsBinary}, [memory, compressed]);
+unpack_tarball(ContentsBinary, Output) ->
+    hex_erl_tar:extract({binary, ContentsBinary}, [{cwd, Output}, compressed]).
 
 create_tarball(Files, Options) ->
     Path = "tmp.tar",
@@ -255,6 +278,22 @@ create_tarball(Files, Options) ->
         false ->
             Tarball
     end.
+
+add_files(Tar, Files) when is_map(Files) ->
+    maps:map(fun(Filename, Binary) -> add_file(Tar, {Filename, Binary}) end, Files);
+add_files(Tar, Files) when is_list(Files) ->
+    lists:map(fun(File) -> add_file(Tar, File) end, Files).
+
+add_file(Tar, {Filename, Contents}) ->
+    ok = hex_erl_tar:add(Tar, Contents, Filename, tar_opts());
+add_file(Tar, Filename) when is_list(Filename) ->
+    ok = hex_erl_tar:add(Tar, Filename, tar_opts()).
+
+tar_opts() ->
+    NixEpoch = calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
+    Y2kEpoch = calendar:datetime_to_gregorian_seconds({{2000, 1, 1}, {0, 0, 0}}),
+    Epoch = Y2kEpoch - NixEpoch,
+    [{atime, Epoch}, {mtime, Epoch}, {ctime, Epoch}, {uid, 0}, {gid, 0}].
 
 %% Reproducible gzip by not setting mtime and OS
 %%
@@ -291,60 +330,10 @@ gzip_no_header(Uncompressed) ->
         zlib:close(Zstream)
     end.
 
-add_files(Tar, Files) when is_map(Files) ->
-    maps:map(fun(Filename, Binary) -> add_file(Tar, {Filename, Binary}) end, Files);
-add_files(Tar, Files) when is_list(Files) ->
-    lists:map(fun(File) -> add_file(Tar, File) end, Files).
 
-add_file(Tar, {Filename, Contents}) ->
-    ok = hex_erl_tar:add(Tar, Contents, Filename, tar_opts());
-add_file(Tar, Filename) when is_list(Filename) ->
-    ok = hex_erl_tar:add(Tar, Filename, tar_opts()).
-
-tar_opts() ->
-    NixEpoch = calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
-    Y2kEpoch = calendar:datetime_to_gregorian_seconds({{2000, 1, 1}, {0, 0, 0}}),
-    Epoch = Y2kEpoch - NixEpoch,
-    [{atime, Epoch}, {mtime, Epoch}, {ctime, Epoch}, {uid, 0}, {gid, 0}].
-
-checksum(Version, MetadataBinary, ContentsBinary) ->
-    Blob = <<Version/binary, MetadataBinary/binary, ContentsBinary/binary>>,
-    crypto:hash(sha256, Blob).
-
-maybe_update_with(Key, Fun, Map) ->
-    case maps:is_key(Key, Map) of
-        true ->
-            maps:update_with(Key, Fun, Map);
-
-        false ->
-            Map
-    end.
-
-normalize_requirements(Requirements) ->
-    case is_list(Requirements) andalso (Requirements /= []) andalso is_list(hd(Requirements)) of
-        true ->
-            try_into_map(fun normalize_requirement/1, Requirements);
-
-        false ->
-            try_into_map(fun({Key, Value}) ->
-                                 {Key, try_into_map(fun(X) -> X end, Value)} end,
-                         Requirements)
-    end.
-
-try_into_map(Fun, List) ->
-    maps:from_list(lists:map(Fun, List)).
-
-normalize_requirement(Requirement) ->
-    {_, Name} = lists:keyfind(<<"name">>, 1, Requirement),
-    List = lists:keydelete(<<"name">>, 1, Requirement),
-    {Name, maps:from_list(List)}.
-
-encode_metadata(Meta) ->
-    Data = lists:map(fun(MetaPair) ->
-        String = io_lib_pretty:print(binarify(MetaPair), [{encoding, utf8}]),
-        unicode:characters_to_binary([String, ".\n"])
-      end, maps:to_list(Meta)),
-    iolist_to_binary(Data).
+%%====================================================================
+%% Helpers
+%%====================================================================
 
 binarify(Term) when is_boolean(Term) ->
     Term;
@@ -366,6 +355,34 @@ binarify({Key, Value}) ->
     {binarify(Key), binarify(Value)};
 binarify(Term) ->
     Term.
+
+diff_keys(Map, RequiredKeys, OptionalKeys) ->
+    Keys = maps:keys(Map),
+    MissingKeys = RequiredKeys -- Keys,
+    UnknownKeys = Keys -- (RequiredKeys ++ OptionalKeys),
+
+    case {MissingKeys, UnknownKeys} of
+        {[], []} ->
+            ok;
+
+        {_, [_ | _]} ->
+            {error, {unknown_keys, UnknownKeys}};
+
+        _ ->
+            {error, {missing_keys, MissingKeys}}
+    end.
+
+maybe_update_with(Key, Fun, Map) ->
+    case maps:is_key(Key, Map) of
+        true ->
+            maps:update_with(Key, Fun, Map);
+
+        false ->
+            Map
+    end.
+
+try_into_map(Fun, List) ->
+    maps:from_list(lists:map(Fun, List)).
 
 encode_base16(Binary) ->
     <<X:256/big-unsigned-integer>> = Binary,
