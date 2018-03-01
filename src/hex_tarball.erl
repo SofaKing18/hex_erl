@@ -264,20 +264,34 @@ unpack_tarball(ContentsBinary, Output) ->
     hex_erl_tar:extract({binary, ContentsBinary}, [{cwd, Output}, compressed]).
 
 create_tarball(Files, Options) ->
-    Path = "tmp.tar",
-    {ok, Tar} = hex_erl_tar:open(Path, [write]),
-    add_files(Tar, Files),
-    ok = hex_erl_tar:close(Tar),
-    {ok, Tarball} = file:read_file(Path),
-    ok = file:delete(Path),
-
+    Tarball = create_memory_tarball(Files),
     case proplists:get_bool(compressed, Options) of
-        true ->
-            gzip(Tarball);
-
-        false ->
-            Tarball
+        true -> gzip(Tarball);
+        false -> Tarball
     end.
+
+create_memory_tarball(Files) ->
+    {ok, Fd} = file:open([], [ram, read, write, binary]),
+    {ok, Tar} = hex_erl_tar:init(Fd, write, fun file_op/2),
+
+    try
+        try
+            add_files(Tar, Files)
+        after
+            ok = hex_erl_tar:close(Tar)
+        end,
+
+        {ok, Size} = file:position(Fd, cur),
+        {ok, Binary} = file:pread(Fd, 0, Size),
+        Binary
+    after
+        ok = file:close(Fd)
+    end.
+
+file_op(write, {Fd, Data}) -> file:write(Fd, Data);
+file_op(position, {Fd, Pos}) -> file:position(Fd, Pos);
+file_op(read2, {Fd, Size}) -> file:read(Fd, Size);
+file_op(close, _Fd) -> ok.
 
 add_files(Tar, Files) when is_map(Files) ->
     maps:map(fun(Filename, Binary) -> add_file(Tar, {Filename, Binary}) end, Files);
