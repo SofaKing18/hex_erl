@@ -2,13 +2,14 @@
 %%   https://github.com/hexpm/hex/blob/master/lib/hex/tar.ex
 %%   https://github.com/tsloughter/rebar3_hex/blob/master/src/rebar3_hex_tar.erl
 -module(hex_tarball).
--export([create/2, unpack/1, format_checksum/1, format_error/1, gzip/1]).
+-export([create/2, unpack/2, format_checksum/1, format_error/1, gzip/1]).
 -define(VERSION, <<"3">>).
 -define(TARBALL_MAX_SIZE, 8 * 1024 * 1024).
 
 -type checksum() :: binary().
--type contents() :: #{Filename :: string() => Contents :: binary()}.
--type files() :: [Filename :: string()] | contents().
+-type contents() :: #{filename() => binary()}.
+-type filename() :: string().
+-type files() :: [filename()] | contents().
 -type metadata() :: map().
 -type tarball() :: binary().
 
@@ -57,22 +58,37 @@ create(Metadata, Files) ->
 %% Examples:
 %%
 %% ```
-%%     hex_tarball:unpack(Tarball).
+%%     hex_tarball:unpack(Tarball, memory).
 %%     %%=> {ok,#{checksum => <<40,32,...>>,
-%%     %%=>       metadata => #{<<"app">> => <<"foo">>, ...},
-%%     %%=>       files => [{"src/foo.erl",<<"-module(foo).">>]}}
+%%     %%=>       contents => [{"src/foo.erl",<<"-module(foo).">>}],
+%%     %%=>       metadata => #{<<"app">> => <<"foo">>, ...}}}
+%%
+%%     hex_tarball:unpack(Tarball, "path/to/unpack").
+%%     %%=> {ok,#{checksum => <<40,32,...>>,
+%%     %%=>       metadata => #{<<"app">> => <<"foo">>, ...}}}
 %% '''
--spec unpack(tarball()) -> {ok, #{checksum => checksum(), metadata => metadata(), contents => contents()}}.
-unpack(Tarball) when byte_size(Tarball) > ?TARBALL_MAX_SIZE ->
+-spec unpack(tarball(), memory) ->
+                {ok, #{checksum => checksum(), metadata => metadata(), contents => contents()}} |
+                {error, term()};
+            (tarball(), filename()) ->
+                {ok, #{checksum => checksum(), metadata => metadata()}} |
+                {error, term()}.
+unpack(Tarball, _) when byte_size(Tarball) > ?TARBALL_MAX_SIZE ->
     {error, {tarball, too_big}};
 
-unpack(Tarball) ->
+unpack(Tarball, Output) ->
     case hex_erl_tar:extract({binary, Tarball}, [memory]) of
         {ok, []} ->
             {error, {tarball, empty}};
 
         {ok, Files} ->
-            State = #{checksum => nil, files => maps:from_list(Files), metadata => nil, contents => nil},
+            State = #{
+                checksum => nil,
+                contents => nil,
+                files => maps:from_list(Files),
+                metadata => nil,
+                output => Output
+            },
             start(State);
 
         {error, Reason} ->
@@ -115,17 +131,25 @@ start(State) ->
 
 finish({error, _} = Error) ->
     Error;
-finish(#{metadata := Metadata, files := Files}) ->
+finish(#{metadata := Metadata, files := Files, output := Output}) ->
     _Version = maps:get("VERSION", Files),
     Checksum = decode_base16(maps:get("CHECKSUM", Files)),
     ContentsBinary = maps:get("contents.tar.gz", Files),
-    case hex_erl_tar:extract({binary, ContentsBinary}, [memory, compressed]) of
+    case do_unpack(ContentsBinary, Output) of
+        ok ->
+            {ok, #{checksum => Checksum, metadata => Metadata}};
+
         {ok, Contents} ->
             {ok, #{checksum => Checksum, metadata => Metadata, contents => Contents}};
 
         {error, Reason} ->
             {error, {inner_tarball, Reason}}
     end.
+
+do_unpack(ContentsBinary, memory) ->
+    hex_erl_tar:extract({binary, ContentsBinary}, [memory, compressed]);
+do_unpack(ContentsBinary, Output) ->
+    hex_erl_tar:extract({binary, ContentsBinary}, [{cwd, Output}, compressed]).
 
 check_files({error, _} = Error) ->
     Error;

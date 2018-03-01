@@ -1,22 +1,43 @@
 -module(hex_tarball_tests).
 -include_lib("eunit/include/eunit.hrl").
 
-sanity_test() ->
+memory_test() ->
     Metadata = #{<<"app">> => <<"foo">>, <<"version">> => <<"1.0.0">>},
-    Files = [{"src/foo.erl", <<"-module(foo).">>}],
-    {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, Files),
-    {ok, #{checksum := Checksum, metadata := Metadata, contents := Files}} = hex_tarball:unpack(Tarball),
+    Contents = [{"src/foo.erl", <<"-module(foo).">>}],
+    {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, Contents),
+    {ok, #{checksum := Checksum, metadata := Metadata, contents := Contents}} = hex_tarball:unpack(Tarball, memory),
     ok.
+
+disk_test() ->
+    in_tmp(fun(Dir) ->
+        ok = file:make_dir(Dir ++ "/pkg"),
+        ok = file:write_file(Dir ++ "/pkg/foo.erl", <<"-module(foo).">>),
+
+        Metadata = #{<<"app">> => <<"foo">>, <<"version">> => <<"1.0.0">>},
+        Files = [{"foo.erl", Dir ++ "/pkg/foo.erl"}],
+        {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, Files),
+        {ok, #{checksum := Checksum, metadata := Metadata}} = hex_tarball:unpack(Tarball, Dir ++ "/unpack"),
+        {ok, <<"-module(foo).">>} = file:read_file(Dir ++ "/unpack/foo.erl")
+    end).
+
+in_tmp(F) ->
+    Dir = "tmp",
+    [] = rm_rf(Dir),
+    ok = file:make_dir(Dir),
+    apply(F, [Dir]).
+
+rm_rf(Path) ->
+    os:cmd("rm -rf " ++ Path).
 
 unpack_error_handling_test() ->
     {ok, {Tarball, Checksum}} = hex_tarball:create(#{"name" => <<"foo">>}, [{"rebar.config", <<"">>}]),
-    {ok, #{checksum := Checksum}} = hex_tarball:unpack(Tarball),
+    {ok, #{checksum := Checksum}} = hex_tarball:unpack(Tarball, memory),
     {ok, OuterFileList} = hex_erl_tar:extract({binary, Tarball}, [memory]),
     OuterFiles = maps:from_list(OuterFileList),
 
     %% tarball
 
-    {error, {tarball, eof}} = hex_tarball:unpack(<<"badtar">>),
+    {error, {tarball, eof}} = hex_tarball:unpack(<<"badtar">>, memory),
 
     {error, {tarball, empty}} = unpack_files(#{}),
 
@@ -75,4 +96,4 @@ unpack_files(Files) ->
     FileList = maps:to_list(Files),
     ok = hex_erl_tar:create("test.tar", FileList, [write]),
     {ok, Binary} = file:read_file("test.tar"),
-    hex_tarball:unpack(Binary).
+    hex_tarball:unpack(Binary, memory).
