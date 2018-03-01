@@ -10,40 +10,38 @@ memory_test() ->
     ok.
 
 disk_test() ->
-    in_tmp(fun(Dir) ->
-        ok = file:make_dir(Dir ++ "/pkg"),
-        ok = file:write_file(Dir ++ "/pkg/foo.erl", <<"-module(foo).">>),
+    in_tmp(fun() ->
+        ok = file:write_file("foo.erl", <<"-module(foo).">>),
 
         Metadata = #{<<"app">> => <<"foo">>, <<"version">> => <<"1.0.0">>},
-        Files = [{"foo.erl", Dir ++ "/pkg/foo.erl"}],
+        Files = ["foo.erl"],
         {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, Files),
-        <<"12250832D707947ABCC43AC265C1D8FB08285FAA2E920C7450C4D2392675B82F">> = hex_tarball:format_checksum(Checksum),
-        {ok, #{checksum := Checksum, metadata := Metadata}} = hex_tarball:unpack(Tarball, Dir ++ "/unpack"),
-        {ok, <<"-module(foo).">>} = file:read_file(Dir ++ "/unpack/foo.erl"),
+        <<"90F7D8E898A44226EE61CF7229D49D2620D08EDF88B64230D0FA197F2D8A42B6">> = hex_tarball:format_checksum(Checksum),
+        {ok, #{checksum := Checksum, metadata := Metadata}} = hex_tarball:unpack(Tarball, "unpack"),
+        {ok, <<"-module(foo).">>} = file:read_file("unpack/foo.erl"),
         {ok, <<"{<<\"app\">>,<<\"foo\">>}.\n{<<\"version\">>,<<\"1.0.0\">>}.\n">>} =
-            file:read_file(Dir ++ "/unpack/hex_metadata.config")
+            file:read_file("unpack/hex_metadata.config")
     end).
 
 timestamps_and_permissions_test() ->
-    in_tmp(fun(Dir) ->
+    in_tmp(fun() ->
         Metadata = #{<<"app">> => <<"foo">>, <<"version">> => <<"1.0.0">>},
 
-        ok = file:write_file(Dir ++ "/foo.sh", <<"">>),
-        {ok, FileInfo} = file:read_file_info(Dir ++ "/foo.sh"),
-        ok = file:write_file_info(Dir ++ "/foo.sh", FileInfo#file_info{mode=8#100755}),
-        {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, [{"foo.erl", <<"">>}, {"foo.sh", Dir ++ "/foo.sh"}]),
+        ok = file:write_file("foo.sh", <<"">>),
+        {ok, FileInfo} = file:read_file_info("foo.sh"),
+        ok = file:write_file_info("foo.sh", FileInfo#file_info{mode=8#100755}),
+        {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, [{"foo.erl", <<"">>}, "foo.sh"]),
 
         %% inside tarball
         {ok, Files} = hex_erl_tar:extract({binary, Tarball}, [memory]),
         {_, ContentsBinary} = lists:keyfind("contents.tar.gz", 1, Files),
         {ok, [FooErlEntry, FooShEntry]} = hex_erl_tar:table({binary, ContentsBinary}, [compressed, verbose]),
         Epoch = epoch(),
-        {_, regular, _, Epoch, 8#100644, 0, 0} = FooErlEntry,
-        %% TODO: 0 should be Epoch
-        {_, regular, _, 0, 8#100755, 0, 0} = FooShEntry,
+        {"foo.erl", regular, _, Epoch, 8#100644, 0, 0} = FooErlEntry,
+        {"foo.sh", regular, _, Epoch, 8#100755, 0, 0} = FooShEntry,
 
         %% unpacked
-        UnpackDir = Dir ++ "/timestamps_and_permissions",
+        UnpackDir = "timestamps_and_permissions",
         {ok, #{checksum := Checksum}} = hex_tarball:unpack(Tarball, UnpackDir),
 
         {ok, FooErlFileInfo} = file:read_file_info(UnpackDir ++ "/foo.erl"),
@@ -51,8 +49,7 @@ timestamps_and_permissions_test() ->
         8#100644 = FooErlFileInfo#file_info.mode,
         8#100755 = FooShFileInfo#file_info.mode,
         [{{2000,1,1}, {0,0,0}}] = calendar:local_time_to_universal_time_dst(FooErlFileInfo#file_info.mtime),
-        %% TODO: should be either 2000,1,1 or current time
-        [{{1970,1,1}, {0,0,0}}] = calendar:local_time_to_universal_time_dst(FooShFileInfo#file_info.mtime)
+        [{{2000,1,1}, {0,0,0}}] = calendar:local_time_to_universal_time_dst(FooShFileInfo#file_info.mtime)
     end).
 
 unpack_error_handling_test() ->
@@ -129,12 +126,15 @@ unpack_files(Files) ->
     hex_tarball:unpack(Binary, memory).
 
 in_tmp(F) ->
+    Old = file:get_cwd(),
     TmpDir = "tmp",
     ok = rm_rf(TmpDir),
     ok = file:make_dir(TmpDir),
     Dir = TmpDir ++ "/" ++ integer_to_list(erlang:unique_integer()),
     ok = file:make_dir(Dir),
-    apply(F, [Dir]).
+    file:set_cwd(Dir),
+    apply(F, []),
+    file:set_cwd(Old).
 
 rm_rf(Path) ->
     [] = os:cmd("rm -rf " ++ Path),

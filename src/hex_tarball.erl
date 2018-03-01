@@ -5,6 +5,7 @@
 -export([create/2, unpack/2, format_checksum/1, format_error/1, gzip/1]).
 -define(VERSION, <<"3">>).
 -define(TARBALL_MAX_SIZE, 8 * 1024 * 1024).
+-include_lib("kernel/include/file.hrl").
 
 -type checksum() :: binary().
 -type contents() :: #{filename() => binary()}.
@@ -302,10 +303,21 @@ add_files(Tar, Files) when is_map(Files) ->
 add_files(Tar, Files) when is_list(Files) ->
     lists:map(fun(File) -> add_file(Tar, File) end, Files).
 
-add_file(Tar, {Filename, Contents}) ->
+add_file(Tar, {Filename, Contents}) when is_list(Filename) and is_binary(Contents) ->
     ok = hex_erl_tar:add(Tar, Contents, Filename, tar_opts());
 add_file(Tar, Filename) when is_list(Filename) ->
-    ok = hex_erl_tar:add(Tar, Filename, tar_opts()).
+    {ok, FileInfo} = file:read_link_info(Filename, []),
+
+    case FileInfo#file_info.type of
+        symlink ->
+            ok = hex_erl_tar:add(Tar, Filename, tar_opts());
+        directory ->
+            ok = hex_erl_tar:add(Tar, Filename, tar_opts());
+        _ ->
+            Mode = FileInfo#file_info.mode,
+            {ok, Contents} = file:read_file(Filename),
+            ok = hex_erl_tar:add(Tar, Contents, Filename, Mode, tar_opts())
+    end.
 
 tar_opts() ->
     NixEpoch = calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
