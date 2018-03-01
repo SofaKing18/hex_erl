@@ -1,5 +1,6 @@
 -module(hex_tarball_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("kernel/include/file.hrl").
 
 memory_test() ->
     Metadata = #{<<"app">> => <<"foo">>, <<"version">> => <<"1.0.0">>},
@@ -18,6 +19,37 @@ disk_test() ->
         {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, Files),
         {ok, #{checksum := Checksum, metadata := Metadata}} = hex_tarball:unpack(Tarball, Dir ++ "/unpack"),
         {ok, <<"-module(foo).">>} = file:read_file(Dir ++ "/unpack/foo.erl")
+    end).
+
+timestamps_and_permissions_test() ->
+    in_tmp(fun(Dir) ->
+        Metadata = #{<<"app">> => <<"foo">>, <<"version">> => <<"1.0.0">>},
+
+        ok = file:write_file(Dir ++ "/foo.sh", <<"">>),
+        {ok, FileInfo} = file:read_file_info(Dir ++ "/foo.sh"),
+        ok = file:write_file_info(Dir ++ "/foo.sh", FileInfo#file_info{mode=8#100755}),
+        {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, [{"foo.erl", <<"">>}, {"foo.sh", Dir ++ "/foo.sh"}]),
+
+        %% inside tarball
+        {ok, Files} = hex_erl_tar:extract({binary, Tarball}, [memory]),
+        {_, ContentsBinary} = lists:keyfind("contents.tar.gz", 1, Files),
+        {ok, [FooErlEntry, FooShEntry]} = hex_erl_tar:table({binary, ContentsBinary}, [compressed, verbose]),
+        Epoch = epoch(),
+        {_, regular, _, Epoch, 8#100644, 0, 0} = FooErlEntry,
+        %% TODO: 0 should be Epoch
+        {_, regular, _, 0, 8#100755, 0, 0} = FooShEntry,
+
+        %% unpacked
+        UnpackDir = Dir ++ "/timestamps_and_permissions",
+        {ok, #{checksum := Checksum}} = hex_tarball:unpack(Tarball, UnpackDir),
+
+        {ok, FooErlFileInfo} = file:read_file_info(UnpackDir ++ "/foo.erl"),
+        {ok, FooShFileInfo} = file:read_file_info(UnpackDir ++ "/foo.sh"),
+        8#100644 = FooErlFileInfo#file_info.mode,
+        8#100755 = FooShFileInfo#file_info.mode,
+        [{{2000,1,1}, {0,0,0}}] = calendar:local_time_to_universal_time_dst(FooErlFileInfo#file_info.mtime),
+        %% TODO: should be either 2000,1,1 or current time
+        [{{1970,1,1}, {0,0,0}}] = calendar:local_time_to_universal_time_dst(FooShFileInfo#file_info.mtime)
     end).
 
 unpack_error_handling_test() ->
@@ -83,6 +115,10 @@ unpack_error_handling_test() ->
 
     ok.
 
+%%====================================================================
+%% Helpers
+%%====================================================================
+
 unpack_files(Files) ->
     FileList = maps:to_list(Files),
     ok = hex_erl_tar:create("test.tar", FileList, [write]),
@@ -90,11 +126,19 @@ unpack_files(Files) ->
     hex_tarball:unpack(Binary, memory).
 
 in_tmp(F) ->
-    Dir = "tmp",
-    ok = rm_rf(Dir),
+    TmpDir = "tmp",
+    ok = rm_rf(TmpDir),
+    ok = file:make_dir(TmpDir),
+    Dir = TmpDir ++ "/" ++ integer_to_list(erlang:unique_integer()),
     ok = file:make_dir(Dir),
     apply(F, [Dir]).
 
 rm_rf(Path) ->
     [] = os:cmd("rm -rf " ++ Path),
     ok.
+
+epoch() ->
+    NixEpoch = calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
+    Y2kEpoch = calendar:datetime_to_gregorian_seconds({{2000, 1, 1}, {0, 0, 0}}),
+    Y2kEpoch - NixEpoch.
+
