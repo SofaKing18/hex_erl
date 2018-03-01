@@ -18,7 +18,9 @@ disk_test() ->
         Files = [{"foo.erl", Dir ++ "/pkg/foo.erl"}],
         {ok, {Tarball, Checksum}} = hex_tarball:create(Metadata, Files),
         {ok, #{checksum := Checksum, metadata := Metadata}} = hex_tarball:unpack(Tarball, Dir ++ "/unpack"),
-        {ok, <<"-module(foo).">>} = file:read_file(Dir ++ "/unpack/foo.erl")
+        {ok, <<"-module(foo).">>} = file:read_file(Dir ++ "/unpack/foo.erl"),
+        {ok, <<"{<<\"app\">>,<<\"foo\">>}.\n{<<\"version\">>,<<\"1.0.0\">>}.\n">>} =
+            file:read_file(Dir ++ "/unpack/hex_metadata.config")
     end).
 
 timestamps_and_permissions_test() ->
