@@ -405,7 +405,8 @@ diff_keys(Map, RequiredKeys, OptionalKeys) ->
 maybe_update_with(Key, Fun, Map) ->
     case maps:is_key(Key, Map) of
         true ->
-            maps:update_with(Key, Fun, Map);
+            Value = maps:get(Key, Map),
+            Map#{Key => apply(Fun, [Value])};
 
         false ->
             Map
